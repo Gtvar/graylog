@@ -1,0 +1,94 @@
+version: '3.6'
+services:
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.2.3
+    container_name: graylog_filebeat
+    restart: on-failure
+    depends_on:
+      - mysql
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml
+      - ./data/mysql/mysql/mysql-slow.log:/var/log/mysql/mysql-slow.log
+      - filebeat_data:/usr/share/filebeat/data/
+    networks:
+      - log_graylog
+
+  mysql:
+    platform: linux/amd64
+    image: mysql:latest
+    restart: always
+    container_name: graylog_mysql
+    env_file: configuration.env
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+      - ./mysql:/etc/mysql/conf.d
+    ports:
+      - 3306:3306
+    networks:
+      - log_graylog
+
+  mongodb:
+    image: mongo:4.2
+    container_name: graylog_mongodb
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - log_graylog
+
+  elasticsearch:
+    container_name: graylog_es
+    image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    environment:
+      - http.host=0.0.0.0
+      - transport.host=localhost
+      - network.host=0.0.0.0
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    networks:
+      - log_graylog
+
+  graylog:
+    image: graylog/graylog:4.3
+    container_name: graylog_graylog
+    volumes:
+      - graylog_data:/usr/share/graylog/data
+      - ./plugin:/usr/share/graylog/plugin
+    environment:
+      - GRAYLOG_PASSWORD_SECRET=somepasswordpepper
+      # Password: admin
+      - GRAYLOG_ROOT_PASSWORD_SHA2=8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
+      - GRAYLOG_HTTP_EXTERNAL_URI=http://127.0.0.1:9000/
+    entrypoint: /usr/bin/tini -- wait-for-it elasticsearch:9200 --  /docker-entrypoint.sh
+    links:
+      - mongodb:mongo
+      - elasticsearch
+      - mysql
+    restart: always
+    depends_on:
+      - mongodb
+      - elasticsearch
+      - mysql
+    ports:
+      - 9000:9000
+      - 5044:5044
+    networks:
+      - log_graylog
+
+networks:
+  log_graylog:
+    driver: bridge
+
+volumes:
+  mongo_data:
+    driver: local
+  es_data:
+    driver: local
+  graylog_data:
+    driver: local
+  filebeat_data:
+    driver: local
